@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.pt
+*.pth
+*.onnx
+*.engine
+outputs/
+.claude/
+*.zip
+*.tar.gz
