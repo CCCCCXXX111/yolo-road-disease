@@ -212,7 +212,14 @@ def cmd_predict(args):
 # ============================================================
 
 def cmd_export(args):
-    raise NotImplementedError
+    model = YOLO(args.model)
+    kwargs = {}
+    for name in ["format", "imgsz", "half", "int8", "dynamic", "workspace"]:
+        val = getattr(args, name, None)
+        if val is not None and val is not False:
+            kwargs[name] = val
+    exported_path = model.export(**kwargs)
+    print(f"模型已导出: {exported_path}")
 
 
 # ============================================================
