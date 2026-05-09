@@ -43,7 +43,48 @@ DEFAULT_MODEL = "yolo11s.pt"
 # ============================================================
 
 def cmd_train(args):
-    raise NotImplementedError
+    model = YOLO(args.model)
+
+    results = model.train(
+        data=args.data,
+        epochs=args.epochs,
+        imgsz=args.imgsz,
+        batch=args.batch,
+        lr0=args.lr,
+        device=args.device,
+        patience=args.patience,
+        resume=args.resume,
+        cos_lr=args.cos_lr,
+        close_mosaic=args.close_mosaic,
+        # 数据增强
+        hsv_h=0.015,
+        hsv_s=0.7,
+        hsv_v=0.4,
+        degrees=10.0,
+        translate=0.1,
+        scale=0.5,
+        fliplr=0.5,
+        mosaic=1.0,
+        mixup=0.1,
+        # 保存
+        project=args.project,
+        name=args.name,
+        exist_ok=True,
+        save=True,
+        save_period=10,
+    )
+
+    best_pt = Path(results.save_dir) / "weights" / "best.pt"
+    if best_pt.exists():
+        print(f"\n最佳模型: {best_pt}")
+        metrics = results.results_dict
+        print(f"mAP@50: {metrics.get('metrics/mAP50(B)', 'N/A')}")
+        print(f"mAP@50-95: {metrics.get('metrics/mAP50-95(B)', 'N/A')}")
+
+    config_path = Path(results.save_dir) / "train_config.json"
+    config_path.write_text(
+        json.dumps(vars(args), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
 
 
 # ============================================================
