@@ -227,19 +227,102 @@ def cmd_export(args):
 # ============================================================
 
 def pre_split(args):
-    raise NotImplementedError
+    """划分训练/验证集"""
+    img_dir = Path(args.img_dir)
+    label_dir = Path(args.label_dir)
+    train_img_dir = Path(args.train_img)
+    val_img_dir = Path(args.val_img)
+    train_lbl_dir = Path(args.train_label)
+    val_lbl_dir = Path(args.val_label)
+
+    for d in [train_img_dir, val_img_dir, train_lbl_dir, val_lbl_dir]:
+        d.mkdir(parents=True, exist_ok=True)
+
+    exts = {".jpg", ".jpeg", ".png", ".bmp"}
+    images = sorted([f for f in img_dir.iterdir() if f.suffix.lower() in exts])
+    random.shuffle(images)
+
+    n_train = int(len(images) * args.ratio)
+    for files, dst_img, dst_lbl in [
+        (images[:n_train], train_img_dir, train_lbl_dir),
+        (images[n_train:], val_img_dir, val_lbl_dir),
+    ]:
+        for img_file in files:
+            shutil.copy2(img_file, dst_img / img_file.name)
+            lbl_file = label_dir / f"{img_file.stem}.txt"
+            if lbl_file.exists():
+                shutil.copy2(lbl_file, dst_lbl / lbl_file.name)
+
+    print(f"训练集: {n_train} 张 | 验证集: {len(images) - n_train} 张")
 
 
 def pre_validate(args):
-    raise NotImplementedError
+    """校验 YOLO 标注格式"""
+    label_dir = Path(args.label_dir)
+    txt_files = list(label_dir.glob("*.txt"))
+    issues = []
+    for tf in txt_files:
+        with open(tf) as f:
+            for i, line in enumerate(f, 1):
+                parts = line.strip().split()
+                if not parts:
+                    continue
+                if len(parts) != 5:
+                    issues.append(f"{tf.name}:L{i} 字段数={len(parts)} 期望5")
+                    continue
+                cls_id = int(parts[0])
+                coords = [float(x) for x in parts[1:]]
+                if cls_id < 0 or cls_id >= args.num_classes:
+                    issues.append(f"{tf.name}:L{i} 类别ID非法 cls={cls_id}")
+                if any(c < 0 or c > 1 for c in coords):
+                    issues.append(f"{tf.name}:L{i} 坐标超出 [0,1] 范围")
+
+    if issues:
+        print(f"发现 {len(issues)} 个问题:")
+        for x in issues[:30]:
+            print(f"  - {x}")
+    else:
+        print(f"校验通过: {len(txt_files)} 个标注文件格式正确")
 
 
 def pre_count(args):
-    raise NotImplementedError
+    """类别分布统计"""
+    label_dir = Path(args.label_dir)
+    counter = Counter()
+    for tf in label_dir.glob("*.txt"):
+        with open(tf) as f:
+            for line in f:
+                parts = line.strip().split()
+                if parts:
+                    counter[int(parts[0])] += 1
+    total = sum(counter.values())
+    print("\n类别分布统计:")
+    for cid in sorted(counter):
+        name = CLASS_NAMES.get(cid, f"class_{cid}")
+        pct = counter[cid] / total * 100 if total else 0
+        print(f"  [{cid}] {name}: {counter[cid]} ({pct:.1f}%)")
+    print(f"  总计: {total}")
 
 
 def pre_analyze(args):
-    raise NotImplementedError
+    """图片尺寸分析"""
+    img_dir = Path(args.img_dir)
+    images = list(img_dir.glob("*"))
+    if not images:
+        print("未找到图片")
+        return
+    ws, hs = [], []
+    for f in images:
+        img = cv2.imread(str(f))
+        if img is None:
+            continue
+        h, w = img.shape[:2]
+        hs.append(h)
+        ws.append(w)
+    print(f"图片数量: {len(images)}")
+    print(f"尺寸范围: {min(ws)}x{min(hs)} ~ {max(ws)}x{max(hs)}")
+    print(f"平均尺寸: {np.mean(ws):.0f}x{np.mean(hs):.0f}")
+    print(f"建议 imgsz: {int(max(max(ws), max(hs)))}")
 
 
 # ============================================================
