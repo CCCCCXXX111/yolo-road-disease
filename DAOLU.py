@@ -102,7 +102,7 @@ def estimate_severity(box_area, img_area):
 
 
 def predict_image(model, img_path, conf, save_dir):
-    results = model(img_path, conf=conf)[0]
+    results = model(img_path, conf=conf, verbose=False)[0]
     img = cv2.imread(str(img_path))
     if img is None:
         print(f"无法读取图片: {img_path}")
@@ -179,7 +179,20 @@ def cmd_predict(args):
             if not ret:
                 break
             results = model(frame, conf=args.conf, verbose=False)[0]
-            cv2.imshow("道路病害检测 — Road Disease Detection", results.plot())
+            h, w = frame.shape[:2]
+            frame_area = h * w
+            for box in results.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                cls_id = int(box.cls[0].item())
+                conf_val = box.conf[0].item()
+                box_area = (x2 - x1) * (y2 - y1)
+                sev_id = estimate_severity(box_area, frame_area)
+                color = SEVERITY_COLORS[sev_id]
+                label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, label, (x1, max(y1 - 8, 12)),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            cv2.imshow("道路病害检测 — Road Disease Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
         cap.release()
