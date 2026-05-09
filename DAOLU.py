@@ -115,7 +115,11 @@ def main():
     p_train.add_argument("--device", default="0")
     p_train.add_argument("--patience", type=int, default=15)
     p_train.add_argument("--resume", action="store_true")
-    p_train.add_argument("--cos-lr", action="store_true", default=True)
+    cos_lr_group = p_train.add_mutually_exclusive_group()
+    cos_lr_group.add_argument("--cos-lr", action="store_true", dest="cos_lr", default=True,
+                              help="余弦退火学习率 (default: True)")
+    cos_lr_group.add_argument("--no-cos-lr", action="store_false", dest="cos_lr",
+                              help="禁用余弦退火")
     p_train.add_argument("--close-mosaic", type=int, default=10)
     p_train.add_argument("--project", default="outputs")
     p_train.add_argument("--name", default="road_disease")
