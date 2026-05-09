@@ -92,19 +92,106 @@ def cmd_train(args):
 # ============================================================
 
 def estimate_severity(box_area, img_area):
-    raise NotImplementedError
+    ratio = box_area / max(img_area, 1)
+    if ratio < 0.02:
+        return 0
+    elif ratio < 0.08:
+        return 1
+    else:
+        return 2
 
 
 def predict_image(model, img_path, conf, save_dir):
-    raise NotImplementedError
+    results = model(img_path, conf=conf)[0]
+    img = cv2.imread(str(img_path))
+    if img is None:
+        print(f"无法读取图片: {img_path}")
+        return
+    h, w = img.shape[:2]
+    img_area = h * w
+
+    for box in results.boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+        cls_id = int(box.cls[0].item())
+        conf_val = box.conf[0].item()
+        box_area = (x2 - x1) * (y2 - y1)
+        sev_id = estimate_severity(box_area, img_area)
+        color = SEVERITY_COLORS[sev_id]
+        label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(img, label, (x1, max(y1 - 8, 12)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+    out_path = Path(save_dir) / f"pred_{Path(img_path).name}"
+    cv2.imwrite(str(out_path), img)
+    print(f"结果已保存: {out_path}")
 
 
 def predict_video(model, video_path, conf, save_dir):
-    raise NotImplementedError
+    cap = cv2.VideoCapture(video_path)
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    out_path = Path(save_dir) / f"pred_{Path(video_path).name}"
+    writer = cv2.VideoWriter(
+        str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
+    )
+
+    frame_count = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        results = model(frame, conf=conf, verbose=False)[0]
+        frame_area = h * w
+        for box in results.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            cls_id = int(box.cls[0].item())
+            conf_val = box.conf[0].item()
+            box_area = (x2 - x1) * (y2 - y1)
+            sev_id = estimate_severity(box_area, frame_area)
+            color = SEVERITY_COLORS[sev_id]
+            label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, label, (x1, max(y1 - 8, 12)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+        writer.write(frame)
+        frame_count += 1
+
+    cap.release()
+    writer.release()
+    print(f"视频处理完成: {frame_count} 帧 → {out_path}")
 
 
 def cmd_predict(args):
-    raise NotImplementedError
+    Path(args.save_dir).mkdir(parents=True, exist_ok=True)
+    model = YOLO(args.model)
+    model.to(args.device)
+
+    source = args.source
+    try:
+        cam_id = int(source)
+        cap = cv2.VideoCapture(cam_id)
+        print(f"摄像头 {cam_id} 已打开，按 'q' 退出")
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            results = model(frame, conf=args.conf, verbose=False)[0]
+            cv2.imshow("道路病害检测 — Road Disease Detection", results.plot())
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+        cap.release()
+        cv2.destroyAllWindows()
+    except ValueError:
+        ext = Path(source).suffix.lower()
+        if ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
+            predict_image(model, source, args.conf, args.save_dir)
+        elif ext in (".mp4", ".avi", ".mov", ".mkv"):
+            predict_video(model, source, args.conf, args.save_dir)
+        else:
+            print(f"不支持的格式: {ext}")
 
 
 # ============================================================
