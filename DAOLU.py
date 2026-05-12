@@ -56,6 +56,7 @@ def cmd_train(args):
         resume=args.resume,
         cos_lr=args.cos_lr,
         close_mosaic=args.close_mosaic,
+        seed=42,
         # 数据增强
         hsv_h=0.015,
         hsv_s=0.7,
@@ -66,12 +67,17 @@ def cmd_train(args):
         fliplr=0.5,
         mosaic=1.0,
         mixup=0.1,
+        label_smoothing=0.1,
+        # 验证 & 可视化
+        val=True,
+        plots=True,
         # 保存
         project=args.project,
         name=args.name,
         exist_ok=True,
         save=True,
         save_period=10,
+        workers=4,
     )
 
     best_pt = Path(results.save_dir) / "weights" / "best.pt"
@@ -335,9 +341,7 @@ def main():
 
     # ---- train ----
     p_train = sub.add_parser("train", help="训练模型")
-    p_train.add_argument("--model", default=DEFAULT_MODEL,
-                         choices=["yolo11n.pt", "yolo11s.pt", "yolo11m.pt",
-                                  "yolo11l.pt", "yolo11x.pt"])
+    p_train.add_argument("--model", default=DEFAULT_MODEL)
     p_train.add_argument("--data", default=DATASET_YAML)
     p_train.add_argument("--epochs", type=int, default=100)
     p_train.add_argument("--imgsz", type=int, default=640)

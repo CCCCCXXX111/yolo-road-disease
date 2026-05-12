@@ -1,9 +1,0 @@
-ultralytics>=8.3.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-torch>=2.0.0
-# 可选：导出部署依赖
-# onnx>=1.15.0         # ONNX 导出
-# onnxruntime>=1.16.0   # ONNX 推理
-# openvino>=2023.3.0   # OpenVINO 导出
-# tensorflow>=2.13.0   # TFLite 导出

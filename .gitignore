@@ -1,10 +1,19 @@
-__pycache__/
-*.py[cod]
+# 模型权重
 *.pt
-*.pth
-*.onnx
-*.engine
-outputs/
+
+# 训练输出
+runs/
+
+# Python
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code
 .claude/
-*.zip
-*.tar.gz
+
+# 数据集 (太大，不适合 GitHub)
+data/
