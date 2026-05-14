@@ -17,3 +17,6 @@ __pycache__/
 
 # 数据集 (太大，不适合 GitHub)
 data/
+
+# 推理结果
+results/

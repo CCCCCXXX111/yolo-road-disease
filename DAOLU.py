@@ -35,7 +35,7 @@ SEVERITY_NAMES = {0: "轻度", 1: "中度", 2: "重度"}
 SEVERITY_COLORS = {0: (0, 255, 0), 1: (0, 255, 255), 2: (0, 0, 255)}
 
 DATASET_YAML = "data/rdd2022/dataset.yaml"
-DEFAULT_MODEL = "yolo11s.pt"
+DEFAULT_MODEL = "yolo11l.pt"
 
 
 # ============================================================
@@ -345,7 +345,7 @@ def main():
     p_train.add_argument("--data", default=DATASET_YAML)
     p_train.add_argument("--epochs", type=int, default=100)
     p_train.add_argument("--imgsz", type=int, default=640)
-    p_train.add_argument("--batch", type=int, default=16)
+    p_train.add_argument("--batch", type=int, default=28)
     p_train.add_argument("--lr", type=float, default=0.001)
     p_train.add_argument("--device", default="0")
     p_train.add_argument("--patience", type=int, default=15)
