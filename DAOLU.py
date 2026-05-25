@@ -18,6 +18,7 @@ from collections import Counter
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 # ============================================================
@@ -56,6 +57,7 @@ def cmd_train(args):
         resume=args.resume,
         cos_lr=args.cos_lr,
         close_mosaic=args.close_mosaic,
+        amp=args.amp,
         seed=42,
         # 数据增强
         hsv_h=0.015,
@@ -92,42 +94,54 @@ def cmd_train(args):
         json.dumps(vars(args), indent=2, ensure_ascii=False), encoding="utf-8"
     )
 
+    torch.cuda.empty_cache()
+
 
 # ============================================================
 # 推理
 # ============================================================
 
-def estimate_severity(box_area, img_area):
+def estimate_severity(box_area, img_area, cls_id):
     ratio = box_area / max(img_area, 1)
-    if ratio < 0.02:
-        return 0
-    elif ratio < 0.08:
-        return 1
-    else:
-        return 2
+    if cls_id in (0, 1):  # 裂缝类：细长但面积小，采用更敏感阈值
+        if ratio < 0.005:
+            return 0
+        elif ratio < 0.03:
+            return 1
+        else:
+            return 2
+    else:  # 龟裂、坑槽：面积比判定
+        if ratio < 0.02:
+            return 0
+        elif ratio < 0.08:
+            return 1
+        else:
+            return 2
 
 
-def predict_image(model, img_path, conf, save_dir):
-    results = model(img_path, conf=conf, verbose=False)[0]
-    img = cv2.imread(str(img_path))
-    if img is None:
-        print(f"无法读取图片: {img_path}")
-        return
-    h, w = img.shape[:2]
-    img_area = h * w
-
+def draw_detections(img, results, img_area):
+    """在图像上绘制检测框和标签（原地修改）"""
     for box in results.boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
         cls_id = int(box.cls[0].item())
         conf_val = box.conf[0].item()
         box_area = (x2 - x1) * (y2 - y1)
-        sev_id = estimate_severity(box_area, img_area)
+        sev_id = estimate_severity(box_area, img_area, cls_id)
         color = SEVERITY_COLORS[sev_id]
         label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
         cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
         cv2.putText(img, label, (x1, max(y1 - 8, 12)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
+
+def predict_image(model, img_path, conf, save_dir):
+    results = model(img_path, conf=conf, verbose=False)[0]
+    img = results.orig_img
+    if img is None:
+        print(f"无法读取图片: {img_path}")
+        return
+    h, w = img.shape[:2]
+    draw_detections(img, results, h * w)
     out_path = Path(save_dir) / f"pred_{Path(img_path).name}"
     cv2.imwrite(str(out_path), img)
     print(f"结果已保存: {out_path}")
@@ -138,34 +152,23 @@ def predict_video(model, video_path, conf, save_dir):
     fps = cap.get(cv2.CAP_PROP_FPS)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
 
     out_path = Path(save_dir) / f"pred_{Path(video_path).name}"
-    writer = cv2.VideoWriter(
-        str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h)
-    )
+    ext = Path(video_path).suffix.lower()
+    fourcc_map = {".mp4": "avc1", ".avi": "XVID", ".mov": "avc1", ".mkv": "avc1"}
+    fourcc = cv2.VideoWriter_fourcc(*fourcc_map.get(ext, "mp4v"))
+    writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h))
+    if not writer.isOpened():
+        writer = cv2.VideoWriter(str(out_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
 
     frame_count = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-        results = model(frame, conf=conf, verbose=False)[0]
-        frame_area = h * w
-        for box in results.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-            cls_id = int(box.cls[0].item())
-            conf_val = box.conf[0].item()
-            box_area = (x2 - x1) * (y2 - y1)
-            sev_id = estimate_severity(box_area, frame_area)
-            color = SEVERITY_COLORS[sev_id]
-            label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, label, (x1, max(y1 - 8, 12)),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    for results in model(video_path, stream=True, conf=conf, verbose=False):
+        frame = results.orig_img
+        draw_detections(frame, results, h * w)
         writer.write(frame)
         frame_count += 1
 
-    cap.release()
     writer.release()
     print(f"视频处理完成: {frame_count} 帧 → {out_path}")
 
@@ -176,34 +179,25 @@ def cmd_predict(args):
     model.to(args.device)
 
     source = args.source
-    try:
+    if source.isdigit():
         cam_id = int(source)
         cap = cv2.VideoCapture(cam_id)
+        if not cap.isOpened():
+            print(f"无法打开摄像头 {cam_id}")
+            return
         print(f"摄像头 {cam_id} 已打开，按 'q' 退出")
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             results = model(frame, conf=args.conf, verbose=False)[0]
-            h, w = frame.shape[:2]
-            frame_area = h * w
-            for box in results.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
-                cls_id = int(box.cls[0].item())
-                conf_val = box.conf[0].item()
-                box_area = (x2 - x1) * (y2 - y1)
-                sev_id = estimate_severity(box_area, frame_area)
-                color = SEVERITY_COLORS[sev_id]
-                label = f"{CLASS_NAMES.get(cls_id, str(cls_id))} {conf_val:.2f} [{SEVERITY_NAMES[sev_id]}]"
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, label, (x1, max(y1 - 8, 12)),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            draw_detections(frame, results, frame.shape[0] * frame.shape[1])
             cv2.imshow("道路病害检测 — Road Disease Detection", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
         cap.release()
         cv2.destroyAllWindows()
-    except ValueError:
+    elif Path(source).exists():
         ext = Path(source).suffix.lower()
         if ext in (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"):
             predict_image(model, source, args.conf, args.save_dir)
@@ -211,6 +205,8 @@ def cmd_predict(args):
             predict_video(model, source, args.conf, args.save_dir)
         else:
             print(f"不支持的格式: {ext}")
+    else:
+        print(f"来源不可用: {source}")
 
 
 # ============================================================
@@ -226,6 +222,7 @@ def cmd_export(args):
             kwargs[name] = val
     exported_path = model.export(**kwargs)
     print(f"模型已导出: {exported_path}")
+    torch.cuda.empty_cache()
 
 
 # ============================================================
@@ -246,6 +243,7 @@ def pre_split(args):
 
     exts = {".jpg", ".jpeg", ".png", ".bmp"}
     images = sorted([f for f in img_dir.iterdir() if f.suffix.lower() in exts])
+    random.seed(args.seed)
     random.shuffle(images)
 
     n_train = int(len(images) * args.ratio)
@@ -312,6 +310,8 @@ def pre_count(args):
 
 def pre_analyze(args):
     """图片尺寸分析"""
+    from PIL import Image as PILImage
+
     img_dir = Path(args.img_dir)
     images = list(img_dir.glob("*"))
     if not images:
@@ -319,10 +319,11 @@ def pre_analyze(args):
         return
     ws, hs = [], []
     for f in images:
-        img = cv2.imread(str(f))
-        if img is None:
+        try:
+            with PILImage.open(f) as im:
+                w, h = im.size
+        except Exception:
             continue
-        h, w = img.shape[:2]
         hs.append(h)
         ws.append(w)
     print(f"图片数量: {len(images)}")
@@ -355,6 +356,11 @@ def main():
                               help="余弦退火学习率 (default: True)")
     cos_lr_group.add_argument("--no-cos-lr", action="store_false", dest="cos_lr",
                               help="禁用余弦退火")
+    amp_group = p_train.add_mutually_exclusive_group()
+    amp_group.add_argument("--amp", action="store_true", dest="amp", default=True,
+                           help="自动混合精度训练 (default: True)")
+    amp_group.add_argument("--no-amp", action="store_false", dest="amp",
+                           help="禁用混合精度")
     p_train.add_argument("--close-mosaic", type=int, default=10)
     p_train.add_argument("--project", default="outputs")
     p_train.add_argument("--name", default="road_disease")
@@ -391,6 +397,7 @@ def main():
     p_split.add_argument("--train-label", default="data/labels/train")
     p_split.add_argument("--val-label", default="data/labels/val")
     p_split.add_argument("--ratio", type=float, default=0.8)
+    p_split.add_argument("--seed", type=int, default=42)
 
     p_val = pre_sub.add_parser("validate", help="校验标注格式")
     p_val.add_argument("--label-dir", required=True)
